@@ -8,7 +8,6 @@ Distributed training with [Ray](https://docs.ray.io) on a local [kind](https://k
 infra/
   kind/           kind cluster configs (cluster.yaml, cluster-gpu.yaml)
   k8s/            RayCluster manifests (CPU / GPU) + NodePort service for the head
-  docker/         Dockerfile.gpu: Ray image + gcc for Triton (GPU cluster)
   monitoring/     Prometheus + Grafana values and Ray PodMonitors
   scripts/        deploy.sh, teardown.sh, setup-gpu.sh, setup-monitoring.sh, setup-venv.sh
 jobs/
@@ -41,7 +40,7 @@ The script:
 1. Creates the kind cluster `ray`.
 2. In GPU mode, runs [setup-gpu.sh](infra/scripts/setup-gpu.sh) to expose the GPU to Kubernetes (explained below).
 3. Installs the KubeRay operator (Helm chart 1.7.1) into namespace `ray`.
-4. Applies the RayCluster ([CPU](infra/k8s/raycluster-cpu.yaml) or [GPU](infra/k8s/raycluster-gpu.yaml)). The CPU cluster uses `rayproject/ray:2.58.0-py312`. The GPU cluster uses `ray-gpu:2.58.0-py312`, which is the same image plus `gcc`, built locally from [Dockerfile.gpu](infra/docker/Dockerfile.gpu) and loaded into kind.
+4. Applies the RayCluster ([CPU](infra/k8s/raycluster-cpu.yaml) or [GPU](infra/k8s/raycluster-gpu.yaml)). All images are official Ray images. The CPU cluster uses `rayproject/ray:2.58.0-py312` (~0.9 GB). In the GPU cluster, the GPU worker uses `rayproject/ray:2.58.0-py312-cu128` (~6.8 GB, CUDA 12.8 toolkit and `gcc`), and the head uses the CPU image.
 5. Installs Prometheus and Grafana and connects them to Ray (see [Metrics](#metrics-prometheus--grafana)).
 6. Waits for the pods, then checks `http://127.0.0.1:8265/api/version`.
 
@@ -239,9 +238,9 @@ The Ray head gets four environment variables in the RayCluster manifests:
    - Installs the NVIDIA device plugin, which advertises `nvidia.com/gpu`.
 4. The GPU worker pod requests `nvidia.com/gpu: 1`, and KubeRay starts Ray on it with `num-gpus=1`.
 
-The GPU cluster's image is the small CPU Ray image plus `gcc` ([Dockerfile.gpu](infra/docker/Dockerfile.gpu)). [gpu.yaml](jobs/runtime-envs/gpu.yaml) installs the CUDA 12.8 build of PyTorch, which includes the CUDA runtime (RTX 50-series cards need CUDA 12.8 or newer). The first GPU job on a node downloads about 3 GB.
+The GPU worker runs Ray's official CUDA image, `rayproject/ray:2.58.0-py312-cu128`. It includes the CUDA 12.8 toolkit and `gcc`. Recent PyTorch uses Triton kernels on the GPU (as does `torch.compile`), and Triton compiles a small C launcher the first time it runs; with the plain CPU image, jobs failed with `RuntimeError: Failed to find C compiler`. The image is about 6.8 GB and is pulled once per new cluster.
 
-`gcc` is there because recent PyTorch uses Triton kernels on the GPU (as does `torch.compile`), and Triton compiles a small C launcher the first time it runs. Without a compiler the job fails with `RuntimeError: Failed to find C compiler`.
+Ray's images don't include PyTorch. [gpu.yaml](jobs/runtime-envs/gpu.yaml) installs the CUDA 12.8 build (RTX 50-series cards need CUDA 12.8 or newer), which downloads about 3 GB the first time a job uses it on a node. `rayproject/ray-ml`, which bundled ML libraries, was discontinued after Ray 2.30, so there's no official 2.58 image with PyTorch.
 
 ## Tear down
 

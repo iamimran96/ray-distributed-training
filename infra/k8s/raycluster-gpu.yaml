@@ -1,10 +1,13 @@
 # Long-running Ray cluster managed by KubeRay: 1 head + 1 GPU worker (CPU worker group scaled to 0).
 # The GPU worker requests nvidia.com/gpu: 1, and KubeRay passes it to Ray as
 # num-gpus=1, so tasks with num_gpus=1 / ScalingConfig(use_gpu=True) land there.
-# All groups use ray-gpu:2.58.0-py312 (infra/docker/Dockerfile.gpu): the small
-# CPU Ray image plus gcc for Triton. PyTorch's CUDA wheels (installed per job via
-# runtime_env) bring their own CUDA libraries, and the NVIDIA runtime injects the
-# driver. deploy.sh builds the image and loads it into kind.
+# Images (official, same Ray 2.58.0 / Python 3.12 in every group):
+# - GPU worker: rayproject/ray:2.58.0-py312-cu128, Ray's CUDA 12.8 image. It includes
+#   the CUDA toolkit and gcc, which Triton (recent PyTorch GPU kernels,
+#   torch.compile) needs to compile its launcher. ~6.8 GB, pulled once per cluster.
+# - Head and CPU workers: rayproject/ray:2.58.0-py312 (~0.9 GB); they don't run GPU code.
+# PyTorch is not in either image; GPU jobs install the CUDA 12.8 wheels via their
+# runtime_env (jobs/runtime-envs/gpu*.yaml). The NVIDIA runtime injects the driver.
 #
 # Memory budget (whole setup must fit in 16 GB, see README "Memory budget"):
 #   head 3.5 GiB + GPU worker 7.5 GiB = 11 GiB
@@ -32,8 +35,7 @@ spec:
       spec:
         containers:
           - name: ray-head
-            image: ray-gpu:2.58.0-py312
-            imagePullPolicy: Never
+            image: rayproject/ray:2.58.0-py312
             ports:
               - {containerPort: 6379, name: gcs-server}
               - {containerPort: 8265, name: dashboard}
@@ -70,8 +72,7 @@ spec:
         spec:
           containers:
             - name: ray-worker
-              image: ray-gpu:2.58.0-py312
-              imagePullPolicy: Never
+              image: rayproject/ray:2.58.0-py312-cu128
               resources:
                 requests: {cpu: "4", memory: "7680Mi", nvidia.com/gpu: 1}
                 limits: {cpu: "4", memory: "7680Mi", nvidia.com/gpu: 1}
@@ -93,8 +94,7 @@ spec:
         spec:
           containers:
             - name: ray-worker
-              image: ray-gpu:2.58.0-py312
-              imagePullPolicy: Never
+              image: rayproject/ray:2.58.0-py312
               resources:
                 requests: {cpu: "2", memory: "1Gi"}
                 limits: {cpu: "2", memory: "1Gi"}
