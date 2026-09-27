@@ -1,0 +1,32 @@
+# CPU-only kind cluster for Ray.
+# The Ray head's dashboard / job API is exposed on NodePort 30265 and mapped
+# to 127.0.0.1:8265 on the host; Grafana and Prometheus map to 3000 and 9090.
+# /shared is the repo's shared/ folder (gitignored), mounted into every node, so Ray pods
+# on any node use it as common storage and all results stay in the repo.
+# __SHARED_DIR__ is filled in by infra/scripts/deploy.sh (absolute path of shared/).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ray
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30265
+        hostPort: 8265
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+      # Grafana and Prometheus (infra/monitoring)
+      - containerPort: 30300
+        hostPort: 3000
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+      - containerPort: 30090
+        hostPort: 9090
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+    extraMounts:
+      - hostPath: __SHARED_DIR__
+        containerPath: /shared
+  - role: worker
+    extraMounts:
+      - hostPath: __SHARED_DIR__
+        containerPath: /shared

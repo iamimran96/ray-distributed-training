@@ -1,0 +1,3 @@
+# Ray CLI / job submission client. Keep the version in sync with the cluster
+# image (infra/k8s/raycluster-*.yaml).
+ray[default]==2.58.0

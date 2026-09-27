@@ -1,0 +1,72 @@
+# kube-prometheus-stack trimmed for a local kind cluster, set up so the Ray
+# dashboard can embed Grafana panels.
+#   Prometheus: http://127.0.0.1:9090  (NodePort 30090)
+#   Grafana:    http://127.0.0.1:3000  (NodePort 30300, anonymous viewer; admin / prom-operator)
+
+# Not needed locally, and kind's control-plane components aren't scrapeable.
+alertmanager: {enabled: false}
+defaultRules: {create: false}
+kubeEtcd: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeProxy: {enabled: false}
+
+# Memory limits keep the whole stack at ~2.1 GiB of the 16 GB budget
+# (README "Memory budget"). Measured peaks: Grafana ~0.8 GiB while it loads the
+# Ray dashboards, Prometheus ~0.3 GiB with 2 days of Ray metrics.
+prometheusOperator:
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 128Mi}
+  prometheusConfigReloader:
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 64Mi}
+kube-state-metrics:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 128Mi}
+prometheus-node-exporter:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 64Mi}
+
+grafana:
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {memory: 768Mi}
+  grafana.ini:
+    # Ray's dashboard shows Grafana panels in iframes.
+    security:
+      allow_embedding: true
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+  service:
+    type: NodePort
+    nodePort: 30300
+  # Picks up the Ray dashboards that setup-monitoring.sh stores as
+  # ConfigMaps labelled grafana_dashboard=1.
+  sidecar:
+    resources:
+      requests: {cpu: 10m, memory: 64Mi}
+      limits: {memory: 128Mi}
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+
+prometheus:
+  service:
+    type: NodePort
+    nodePort: 30090
+  prometheusSpec:
+    # Select every PodMonitor/ServiceMonitor/rule, not only ones carrying the Helm release label.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 2d
+    retentionSize: 1GB
+    resources:
+      requests: {cpu: 100m, memory: 384Mi}
+      limits: {memory: 768Mi}

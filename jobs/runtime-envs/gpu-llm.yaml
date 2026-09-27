@@ -1,0 +1,24 @@
+# LLM fine-tuning deps on top of the CUDA 12.8 PyTorch build (see gpu.yaml).
+# HF_HOME points at shared storage so the model and dataset download once.
+pip:
+  packages:
+    - torch
+    - transformers
+    - peft
+    - datasets
+    - accelerate
+    - safetensors
+    - rouge_score
+  pip_install_options:
+    - --index-url
+    - https://download.pytorch.org/whl/cu128
+    - --extra-index-url
+    - https://pypi.org/simple
+env_vars:
+  HF_HOME: /mnt/shared/hf-cache
+  TOKENIZERS_PARALLELISM: "false"
+config:
+  # Install only on nodes that run this job's driver/workers (head + GPU worker),
+  # not eagerly on every node: a node that doesn't need it (e.g. a CPU worker)
+  # would otherwise spend ~1.5 GiB of RAM and ~5 GB of disk installing it.
+  eager_install: false

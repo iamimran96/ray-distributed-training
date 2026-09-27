@@ -1,0 +1,74 @@
+# Long-running Ray cluster managed by KubeRay: 1 head + 2 CPU workers.
+# Jobs are submitted to the head's job API on 127.0.0.1:8265.
+#
+# Memory budget (whole setup must fit in 16 GB, see README "Memory budget"):
+#   head 3.5 GiB + 2 x CPU worker 3 GiB = 9.5 GiB
+# The head runs job drivers and installs each job's runtime env, so it gets extra headroom.
+# Memory requests equal limits, so Kubernetes never overcommits the node.
+# Each pod gets a fixed Ray object store (default is 30% of pod memory); it lives
+# in /dev/shm, whose size counts against the pod's memory limit.
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: ray
+spec:
+  rayVersion: "2.58.0"
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      # Keep the head free for job drivers; tasks and training run on workers.
+      num-cpus: "0"
+      object-store-memory: "536870912"   # 512 MiB
+    template:
+      spec:
+        containers:
+          - name: ray-head
+            image: rayproject/ray:2.58.0-py312
+            ports:
+              - {containerPort: 6379, name: gcs-server}
+              - {containerPort: 8265, name: dashboard}
+              - {containerPort: 10001, name: client}
+              - {containerPort: 8080, name: metrics}
+              - {containerPort: 44217, name: as-metrics}
+              - {containerPort: 44227, name: dash-metrics}
+            env:
+              # Where the Ray dashboard finds Prometheus/Grafana (in-cluster), and the
+              # Grafana URL your browser loads the embedded panels from.
+              - {name: RAY_PROMETHEUS_HOST, value: "http://prometheus-kube-prometheus-prometheus.prometheus-system.svc:9090"}
+              - {name: RAY_PROMETHEUS_NAME, value: "Prometheus"}
+              - {name: RAY_GRAFANA_HOST, value: "http://prometheus-grafana.prometheus-system.svc:80"}
+              - {name: RAY_GRAFANA_IFRAME_HOST, value: "http://127.0.0.1:3000"}
+            resources:
+              requests: {cpu: "500m", memory: "3584Mi"}
+              limits: {cpu: "2", memory: "3584Mi"}
+            volumeMounts:
+              - {name: shared, mountPath: /mnt/shared}
+              - {name: dshm, mountPath: /dev/shm}
+        volumes:
+          - name: shared
+            hostPath: {path: /shared, type: DirectoryOrCreate}
+          - name: dshm
+            emptyDir: {medium: Memory, sizeLimit: 768Mi}
+  workerGroupSpecs:
+    - groupName: cpu
+      replicas: 2
+      minReplicas: 1
+      maxReplicas: 2
+      rayStartParams:
+        object-store-memory: "805306368"   # 768 MiB
+      template:
+        spec:
+          containers:
+            - name: ray-worker
+              image: rayproject/ray:2.58.0-py312
+              resources:
+                requests: {cpu: "2", memory: "3Gi"}
+                limits: {cpu: "2", memory: "3Gi"}
+              volumeMounts:
+                - {name: shared, mountPath: /mnt/shared}
+                - {name: dshm, mountPath: /dev/shm}
+          volumes:
+            - name: shared
+              hostPath: {path: /shared, type: DirectoryOrCreate}
+            - name: dshm
+              emptyDir: {medium: Memory, sizeLimit: 1Gi}

@@ -1,0 +1,38 @@
+# kind cluster for Ray with the local NVIDIA GPU exposed to the worker node.
+# Works with Docker Desktop on Windows (WSL2 backend): the GPU appears in the
+# Docker VM as /dev/dxg plus user-mode driver libraries under /usr/lib/wsl,
+# which are mounted into the worker. infra/scripts/setup-gpu.sh then installs
+# the NVIDIA container toolkit and device plugin inside the cluster.
+# /shared is the repo's shared/ folder (gitignored), mounted into every node;
+# __SHARED_DIR__ is filled in by infra/scripts/deploy.sh.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ray
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30265
+        hostPort: 8265
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+      # Grafana and Prometheus (infra/monitoring)
+      - containerPort: 30300
+        hostPort: 3000
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+      - containerPort: 30090
+        hostPort: 9090
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+    extraMounts:
+      - hostPath: __SHARED_DIR__
+        containerPath: /shared
+  - role: worker
+    labels:
+      nvidia.com/gpu.present: "true"
+    extraMounts:
+      - hostPath: __SHARED_DIR__
+        containerPath: /shared
+      - hostPath: /usr/lib/wsl
+        containerPath: /usr/lib/wsl
+        readOnly: true

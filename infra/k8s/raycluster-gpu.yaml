@@ -1,0 +1,108 @@
+# Long-running Ray cluster managed by KubeRay: 1 head + 1 GPU worker (CPU worker group scaled to 0).
+# The GPU worker requests nvidia.com/gpu: 1, and KubeRay passes it to Ray as
+# num-gpus=1, so tasks with num_gpus=1 / ScalingConfig(use_gpu=True) land there.
+# All groups use ray-gpu:2.58.0-py312 (infra/docker/Dockerfile.gpu): the small
+# CPU Ray image plus gcc for Triton. PyTorch's CUDA wheels (installed per job via
+# runtime_env) bring their own CUDA libraries, and the NVIDIA runtime injects the
+# driver. deploy.sh builds the image and loads it into kind.
+#
+# Memory budget (whole setup must fit in 16 GB, see README "Memory budget"):
+#   head 3.5 GiB + GPU worker 7.5 GiB = 11 GiB
+# - GPU worker: every DDP training worker runs here; with
+#   `finetune.py --num-workers 2` two of them share the GPU and this pod's RAM.
+# - Head: runs the job driver and installs each job's runtime env (pip unpacking
+#   CUDA PyTorch peaks ~2.3 GiB).
+# - CPU worker group: 0 replicas, its memory went to the GPU worker. To use it,
+#   set `replicas: 1` below and take 1 GiB from another pod to stay in budget.
+# Memory requests equal limits, so Kubernetes never overcommits the node.
+# Each pod gets a fixed Ray object store (default is 30% of pod memory); it lives
+# in /dev/shm, whose size counts against the pod's memory limit.
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: ray
+spec:
+  rayVersion: "2.58.0"
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      num-cpus: "0"
+      object-store-memory: "536870912"   # 512 MiB
+    template:
+      spec:
+        containers:
+          - name: ray-head
+            image: ray-gpu:2.58.0-py312
+            imagePullPolicy: Never
+            ports:
+              - {containerPort: 6379, name: gcs-server}
+              - {containerPort: 8265, name: dashboard}
+              - {containerPort: 10001, name: client}
+              - {containerPort: 8080, name: metrics}
+              - {containerPort: 44217, name: as-metrics}
+              - {containerPort: 44227, name: dash-metrics}
+            env:
+              # Where the Ray dashboard finds Prometheus/Grafana (in-cluster), and the
+              # Grafana URL your browser loads the embedded panels from.
+              - {name: RAY_PROMETHEUS_HOST, value: "http://prometheus-kube-prometheus-prometheus.prometheus-system.svc:9090"}
+              - {name: RAY_PROMETHEUS_NAME, value: "Prometheus"}
+              - {name: RAY_GRAFANA_HOST, value: "http://prometheus-grafana.prometheus-system.svc:80"}
+              - {name: RAY_GRAFANA_IFRAME_HOST, value: "http://127.0.0.1:3000"}
+            resources:
+              requests: {cpu: "500m", memory: "3584Mi"}
+              limits: {cpu: "2", memory: "3584Mi"}
+            volumeMounts:
+              - {name: shared, mountPath: /mnt/shared}
+              - {name: dshm, mountPath: /dev/shm}
+        volumes:
+          - name: shared
+            hostPath: {path: /shared, type: DirectoryOrCreate}
+          - name: dshm
+            emptyDir: {medium: Memory, sizeLimit: 768Mi}
+  workerGroupSpecs:
+    - groupName: gpu
+      replicas: 1
+      minReplicas: 1
+      maxReplicas: 1
+      rayStartParams:
+        object-store-memory: "1073741824"   # 1 GiB
+      template:
+        spec:
+          containers:
+            - name: ray-worker
+              image: ray-gpu:2.58.0-py312
+              imagePullPolicy: Never
+              resources:
+                requests: {cpu: "4", memory: "7680Mi", nvidia.com/gpu: 1}
+                limits: {cpu: "4", memory: "7680Mi", nvidia.com/gpu: 1}
+              volumeMounts:
+                - {name: shared, mountPath: /mnt/shared}
+                - {name: dshm, mountPath: /dev/shm}
+          volumes:
+            - name: shared
+              hostPath: {path: /shared, type: DirectoryOrCreate}
+            - name: dshm
+              emptyDir: {medium: Memory, sizeLimit: 1280Mi}
+    - groupName: cpu
+      replicas: 0
+      minReplicas: 0
+      maxReplicas: 1
+      rayStartParams:
+        object-store-memory: "268435456"   # 256 MiB
+      template:
+        spec:
+          containers:
+            - name: ray-worker
+              image: ray-gpu:2.58.0-py312
+              imagePullPolicy: Never
+              resources:
+                requests: {cpu: "2", memory: "1Gi"}
+                limits: {cpu: "2", memory: "1Gi"}
+              volumeMounts:
+                - {name: shared, mountPath: /mnt/shared}
+                - {name: dshm, mountPath: /dev/shm}
+          volumes:
+            - name: shared
+              hostPath: {path: /shared, type: DirectoryOrCreate}
+            - name: dshm
+              emptyDir: {medium: Memory, sizeLimit: 384Mi}

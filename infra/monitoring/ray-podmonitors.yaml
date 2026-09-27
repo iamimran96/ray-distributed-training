@@ -1,0 +1,48 @@
+# Scrape Ray metrics from the head and worker pods in the `ray` namespace.
+# Based on KubeRay's config/prometheus/podMonitor.yaml.
+#   metrics      (8080)  - Ray node/task/actor/train metrics, every Ray pod
+#   as-metrics   (44217) - autoscaler metrics, head only
+#   dash-metrics (44227) - dashboard metrics, head only
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: ray-head-monitor
+  namespace: prometheus-system
+  labels:
+    release: prometheus
+spec:
+  jobLabel: ray-head
+  namespaceSelector:
+    matchNames: [ray]
+  selector:
+    matchLabels:
+      ray.io/node-type: head
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - {action: replace, sourceLabels: [__meta_kubernetes_pod_label_ray_io_cluster], targetLabel: ray_io_cluster}
+    - port: as-metrics
+      relabelings:
+        - {action: replace, sourceLabels: [__meta_kubernetes_pod_label_ray_io_cluster], targetLabel: ray_io_cluster}
+    - port: dash-metrics
+      relabelings:
+        - {action: replace, sourceLabels: [__meta_kubernetes_pod_label_ray_io_cluster], targetLabel: ray_io_cluster}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: ray-workers-monitor
+  namespace: prometheus-system
+  labels:
+    release: prometheus
+spec:
+  jobLabel: ray-workers
+  namespaceSelector:
+    matchNames: [ray]
+  selector:
+    matchLabels:
+      ray.io/node-type: worker
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - {action: replace, sourceLabels: [__meta_kubernetes_pod_label_ray_io_cluster], targetLabel: ray_io_cluster}

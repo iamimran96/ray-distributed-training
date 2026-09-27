@@ -1,0 +1,15 @@
+# CUDA 12.8 PyTorch build: required for RTX 50-series (Blackwell) GPUs and
+# fine on older cards. The wheels bundle the CUDA runtime (~3 GB download on
+# first use per node; cached afterwards).
+pip:
+  packages:
+    - torch
+    - torchvision
+  pip_install_options:
+    - --index-url
+    - https://download.pytorch.org/whl/cu128
+    - --extra-index-url
+    - https://pypi.org/simple
+config:
+  # Install only on nodes that run this job, not eagerly on every node.
+  eager_install: false

@@ -1,0 +1,11 @@
+# Python deps installed on every Ray node the job touches (cached per node,
+# so only the first job with this env pays the install cost).
+pip:
+  packages:
+    - torch
+    - torchvision
+  pip_install_options:
+    - --index-url
+    - https://download.pytorch.org/whl/cpu
+    - --extra-index-url
+    - https://pypi.org/simple
