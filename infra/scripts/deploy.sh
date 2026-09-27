@@ -78,17 +78,7 @@ create_cluster() {
 
   if [[ "$GPU" == "1" ]]; then
     CLUSTER_NAME="$CLUSTER_NAME" "${INFRA_DIR}/scripts/setup-gpu.sh"
-    build_gpu_image
   fi
-}
-
-# GPU pods use the Ray image plus gcc (Triton needs a C compiler); build it
-# locally and load it into the kind nodes instead of pushing to a registry.
-build_gpu_image() {
-  local image="ray-gpu:2.58.0-py312"
-  log "Building ${image} and loading it into kind"
-  docker build -q -f "${INFRA_DIR}/docker/Dockerfile.gpu" -t "$image" "${INFRA_DIR}/docker" >/dev/null
-  kind load docker-image "$image" --name "$CLUSTER_NAME" >/dev/null
 }
 
 install_kuberay() {
@@ -127,7 +117,9 @@ gib() { awk -v m="$1" 'BEGIN {printf "%.1f", m / 1024}'; }
 deploy_ray() {
   local manifest="${INFRA_DIR}/k8s/raycluster-cpu.yaml"
   [[ "$GPU" == "1" ]] && manifest="${INFRA_DIR}/k8s/raycluster-gpu.yaml"
-  log "Applying $(basename "$manifest") (first run pulls the ~1 GB Ray image)"
+  local pull="~1 GB rayproject/ray image"
+  [[ "$GPU" == "1" ]] && pull="rayproject/ray images, incl. the ~6.8 GB CUDA one"
+  log "Applying $(basename "$manifest") (a new cluster first pulls the ${pull})"
   kc -n "$NAMESPACE" apply -f "$manifest" -f "${INFRA_DIR}/k8s/head-service.yaml" >/dev/null
 
   log "Waiting for Ray pods to be ready (timeout ${WAIT_TIMEOUT})"
